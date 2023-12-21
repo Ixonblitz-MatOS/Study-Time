@@ -1,11 +1,11 @@
 import sys,glob
-import typing
 from PyQt5 import QtGui, QtCore
 from os.path import exists
 from platform import system
 from os import remove,mkdir
+from random import choice
 from win32com.client import Dispatch
-from PyQt5.QtWidgets import QApplication,QFrame,QVBoxLayout,QCheckBox,QStackedWidget,QAbstractItemView, QWidget, QLabel, QPushButton,QBoxLayout,QLineEdit,QShortcut,QTableWidget,QTableWidgetItem,QProgressBar,QHBoxLayout
+from PyQt5.QtWidgets import QApplication,QGraphicsOpacityEffect,QFrame,QVBoxLayout,QCheckBox,QStackedWidget,QAbstractItemView, QWidget, QLabel, QPushButton,QBoxLayout,QLineEdit,QShortcut,QTableWidget,QTableWidgetItem,QProgressBar,QHBoxLayout
 #make an error dialog box with init parameter of string to put a message to dialog and a button to close it labeled with "okay"
 QFont=QtGui.QFont
 QEventLoop=QtCore.QEventLoop
@@ -275,14 +275,65 @@ class LearnCard(QWidget):
     """
     Used for learn with implemented fade in/out QAnimation
     """
+    def _learnNextQuestionType(self)->str:
+        """
+        depending on Learn Settings will determine what is allowed to be chosen
+        """
+        allowed_question_types=self.settings["Question Type Choice"]
+        return choice(allowed_question_types)
+    def fadein(self):
+        self.effect = QGraphicsOpacityEffect()
+        self.setGraphicsEffect(self.effect)
+        self.animation = QtCore.QPropertyAnimation(self.effect, b"opacity")
+        self.animation.setDuration(1000)
+        self.animation.setStartValue(0)
+        self.animation.setEndValue(1)
+        self.animation.start()
+    def _learnNewQuestion(self)->None:
+        """
+        This function will get a new question and answer and change the text of the question and answer
+        :NOTE: Must check if Shuffle is On, the Answer types, and the allowed Question types. The _learnNextQuestionType() keeps track of allowed question types
+        """
+        self.correctAnswer=""
+        if self.settings["Card Order"]==["Shuffle"]:
+            question=choice(list(self.cards.keys()))
+            self.correctAnswer=self.cards[question]
+            self.learnRightPanelQuestion.setText(question)
+        else:pass
+
+        self.fadein()#show new question at the end
+    def getAnswer(self)->str:return self.learnRightPanelAnswer.text().rstrip()
+    def fadeout(self):
+        """
+        Fade out after each question then call a new question before fading back in
+        """
+        self.effect = QGraphicsOpacityEffect()
+        self.setGraphicsEffect(self.effect)
+        self.animation = QtCore.QPropertyAnimation(self.effect, b"opacity")
+        self.animation.setDuration(1000)
+        self.animation.setStartValue(1)
+        self.animation.setEndValue(0)
+        self.animation.start()
+        self._learnNewQuestion()
     def _learnSubmit(self):
         """
         This is run when submit is clicked. We must add an enter Shortcut to press the submit button
         This function evaluates the answer and changes the text of the button to Correct or Incorrect and changes the background to green or red
         Then get the next Question and Answer and change the text of the question and answer
-        
-        
         """
+        if self.getAnswer()==self.correctAnswer:
+            self.learnRightPanelSubmitButton.setText("Correct!")
+            self.learnRightPanelSubmitButton.setStyleSheet("QPushButton{font: 20pt Comic Sans MS; background-color: green; color: white;} QPushButton::hover{background-color: green; color: white;}")
+            self.fadeout()
+        else:
+            self.learnRightPanelSubmitButton.setText("Incorrect!")
+            self.learnRightPanelSubmitButton.setStyleSheet("QPushButton{font: 20pt Comic Sans MS; color: red;} QPushButton::hover{background-color: red; color: white;}")
+            self.fadeout()
+    def _setProgressbars(self,amountOfQuestions:int)->None:
+        self.Parent.learnLeftPanelProgressCorrect.setMaximum(amountOfQuestions)
+        self.Parent.learnLeftPanelProgressIncorrect.setMaximum(amountOfQuestions)
+    def _addCorrect(self)->None:self.Parent.learnLeftPanelProgressCorrect.setValue(self.Parent.learnLeftPanelProgressCorrect.value()+1)
+    def _addIncorrect(self)->None:self.Parent.learnLeftPanelProgressIncorrect.setValue(self.Parent.learnLeftPanelProgressIncorrect.value()+1)
     def __init__(self,parent) -> None:
         super().__init__()
         self.Parent=parent
@@ -302,7 +353,13 @@ class LearnCard(QWidget):
         self.learnRightPanelSubmitButton.setStyleSheet("QPushButton{font: 20pt Comic Sans MS; color: white;} QPushButton::hover{background-color: white; color: black;}")
         self.learnRightPanelSubmitButton.clicked.connect(self._learnSubmit)
         self.learnRightPanelLayout.addWidget(self.learnRightPanelSubmitButton)
-
+        #Set first card
+        self.cards=self.Parent.currentset().cards
+        self.settings=self.Parent.LearnSettings
+        #we must calculate the amount of questions by the length of the amount of terms in the dictionary of self.cards
+        self.amountOfQuestions=len(self.cards)
+        self._setProgressbars(self.amountOfQuestions)
+        self._learnNewQuestion()#All Question handling is done in this function
 class MainWindow(QStackedWidget):
     class CustomRemovePopup(QWidget):
         def __init__(self,parent:'MainWindow',e=None) -> None:
@@ -360,6 +417,12 @@ class MainWindow(QStackedWidget):
                 self.p.currentSet.saveSet(True)
             except KeyError:pass#Nothing left in table
             self._calculate()
+    class LearnLeftPanelQBox(QBoxLayout):
+        def __init__(self):
+            super().__init__(QBoxLayout.TopToBottom)
+            self.setContentsMargins(0,0,0,0)
+            self.setSpacing(0)
+
     def __init__(self):
         super().__init__()
         self.FirstMenuQWidget=QWidget()
@@ -511,7 +574,7 @@ class MainWindow(QStackedWidget):
         self.learnFrame.setObjectName("learnFrame")
         self.learnFrame.setStyleSheet("background-color: black; color:white;")
         self.learnLeftPanel=QWidget()
-        self.learnLeftPanelLayout=QBoxLayout(QBoxLayout.TopToBottom,self)
+        self.learnLeftPanelLayout=self.LearnLeftPanelQBox()
         self.learnLeftPanel.setLayout(self.learnLeftPanelLayout)
         self.learnFrameLayout.addWidget(self.learnLeftPanel)
         self.learnLeftPanel.setObjectName("learnLeftPanel")
@@ -539,9 +602,7 @@ class MainWindow(QStackedWidget):
         self.learnLeftPanelLayout.addWidget(self.learnLeftPanelSettingsButton)
         self.learnRightPanel=LearnCard(self)
         self.learnFrameLayout.addWidget(self.learnRightPanel)
-###########################################################################################################################
-#######Learn Code##########################################################################################################
-###########################################################################################################################
+
     def Test(self):pass
     def _editStudySet(self):
         self.EDIT=True
